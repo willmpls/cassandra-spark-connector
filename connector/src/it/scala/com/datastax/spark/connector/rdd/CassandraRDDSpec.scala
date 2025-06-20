@@ -34,6 +34,8 @@ import com.datastax.spark.connector.mapper.{DefaultColumnMapper, JavaBeanColumnM
 import com.datastax.spark.connector.rdd.partitioner.dht.TokenFactory
 import com.datastax.spark.connector.types.{CassandraOption, TypeConverter}
 import com.datastax.spark.connector.util.RuntimeUtil
+import com.datastax.spark.connector.writer.{TimestampOption, TTLOption, WriteConf}
+import org.joda.time.DateTime
 import org.apache.spark.sql.catalyst.analysis.NoSuchNamespaceException
 
 import scala.concurrent.Future
@@ -1377,6 +1379,84 @@ class CassandraRDDSpec extends SparkCassandraITFlatSpecBase with DefaultCluster 
       (10, 10, Some("1010")),
       (10, 11, Some("1011")),
       (10, 12, Some("1012")))
+
+  }
+
+  it should "not delete rows older than year 2000" in {
+
+    conn.withSessionDo { session =>
+      session.execute(s"""DROP TABLE IF EXISTS $ks.delete_old_rows""")
+      session.execute(s"""CREATE TABLE $ks.delete_old_rows(key INT, group INT, value VARCHAR, PRIMARY KEY (key, group))""")
+      session.execute(s"""INSERT INTO $ks.delete_old_rows(key, group, value) VALUES (10, 10, '1010')""")
+      session.execute(s"""INSERT INTO $ks.delete_old_rows(key, group, value) VALUES (10, 11, '1011')""")
+      session.execute(s"""INSERT INTO $ks.delete_old_rows(key, group, value) VALUES (10, 12, '1012')""")
+      session.execute(s"""INSERT INTO $ks.delete_old_rows(key, group, value) VALUES (20, 20, '2020')""")
+      session.execute(s"""INSERT INTO $ks.delete_old_rows(key, group, value) VALUES (20, 21, '2021')""")
+      session.execute(s"""INSERT INTO $ks.delete_old_rows(key, group, value) VALUES (20, 22, '2022')""")
+    }
+
+    sc.cassandraTable(ks, "delete_old_rows").where("key = 10")
+      .deleteFromCassandra(ks, "delete_old_rows",
+        writeConf = WriteConf(ttl = TTLOption.constant(1), timestamp = TimestampOption.constant(new DateTime(2000, 1, 1, 7, 8, 8, 10))))
+
+    val results = sc
+      .cassandraTable[(Int, Int, String)](ks, "delete_old_rows")
+      .select("key", "group", "value")
+      .collect()
+
+    results should have size 6
+
+  }
+
+  it should "delete rows older than year 2100" in {
+
+    conn.withSessionDo { session =>
+      session.execute(s"""DROP TABLE IF EXISTS $ks.delete_old_rows1""")
+      session.execute(s"""CREATE TABLE $ks.delete_old_rows1(key INT, group INT, value VARCHAR, PRIMARY KEY (key, group))""")
+      session.execute(s"""INSERT INTO $ks.delete_old_rows1(key, group, value) VALUES (10, 10, '1010')""")
+      session.execute(s"""INSERT INTO $ks.delete_old_rows1(key, group, value) VALUES (10, 11, '1011')""")
+      session.execute(s"""INSERT INTO $ks.delete_old_rows1(key, group, value) VALUES (10, 12, '1012')""")
+      session.execute(s"""INSERT INTO $ks.delete_old_rows1(key, group, value) VALUES (20, 20, '2020')""")
+      session.execute(s"""INSERT INTO $ks.delete_old_rows1(key, group, value) VALUES (20, 21, '2021')""")
+      session.execute(s"""INSERT INTO $ks.delete_old_rows1(key, group, value) VALUES (20, 22, '2022')""")
+    }
+
+    sc.cassandraTable(ks, "delete_old_rows1").where("key = 10")
+      .deleteFromCassandra(ks, "delete_old_rows1",
+        writeConf = WriteConf(ttl = TTLOption.constant(1), timestamp = TimestampOption.constant(new DateTime(2100, 1, 1, 7, 8, 8, 10))))
+
+    val results = sc
+      .cassandraTable[(Int, Int, String)](ks, "delete_old_rows1")
+      .select("key", "group", "value")
+      .collect()
+
+    results should have size 3
+
+  }
+
+  it should "delete rows and ignore ttl setting" in {
+
+    conn.withSessionDo { session =>
+      session.execute(s"""DROP TABLE IF EXISTS $ks.delete_old_rows2""")
+      session.execute(s"""CREATE TABLE $ks.delete_old_rows2(key INT, group INT, value VARCHAR, PRIMARY KEY (key, group))""")
+      session.execute(s"""INSERT INTO $ks.delete_old_rows2(key, group, value) VALUES (10, 10, '1010')""")
+      session.execute(s"""INSERT INTO $ks.delete_old_rows2(key, group, value) VALUES (10, 11, '1011')""")
+      session.execute(s"""INSERT INTO $ks.delete_old_rows2(key, group, value) VALUES (10, 12, '1012')""")
+      session.execute(s"""INSERT INTO $ks.delete_old_rows2(key, group, value) VALUES (20, 20, '2020')""")
+      session.execute(s"""INSERT INTO $ks.delete_old_rows2(key, group, value) VALUES (20, 21, '2021')""")
+      session.execute(s"""INSERT INTO $ks.delete_old_rows2(key, group, value) VALUES (20, 22, '2022')""")
+    }
+
+    sc.cassandraTable(ks, "delete_old_rows2").where("key = 10")
+      .deleteFromCassandra(ks, "delete_old_rows2",
+        writeConf = WriteConf(ttl = TTLOption.constant(13456)))
+
+    val results = sc
+      .cassandraTable[(Int, Int, String)](ks, "delete_old_rows2")
+      .select("key", "group", "value")
+      .collect()
+
+    results should have size 3
 
   }
 
