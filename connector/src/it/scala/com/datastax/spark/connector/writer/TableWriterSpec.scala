@@ -875,6 +875,106 @@ class TableWriterSpec extends SparkCassandraITFlatSpecBase with DefaultCluster {
     testMap.toSeq should contain allOf(("One", "One"), ("Two", "Two"), ("Three", "Three"))
   }
 
+  it should "apply TTL when using collection append with set" in {
+    conn.withSessionDo(_.execute(s"""TRUNCATE $ks.collections_mod"""))
+    val setElements = sc.parallelize(Seq(
+      (100, Set("One")),
+      (100, Set("Two")),
+      (100, Set("Three"))))
+    setElements.saveToCassandra(ks, "collections_mod", SomeColumns("key", "scol".append),
+      writeConf = WriteConf(ttl = TTLOption.constant(100)))
+
+    conn.withSessionDo { session =>
+      val result = session.execute(s"""SELECT TTL(scol) FROM $ks.collections_mod WHERE key = 100""").one()
+      result.getInt(0) should be > 50
+      result.getInt(0) should be <= 100
+    }
+  }
+
+  it should "apply TTL when using list append" in {
+    conn.withSessionDo(_.execute(s"""TRUNCATE $ks.collections_mod"""))
+    val listElements = sc.parallelize(Seq(
+      (101, Vector("One")),
+      (101, Vector("Two")),
+      (101, Vector("Three"))))
+    listElements.saveToCassandra(ks, "collections_mod", SomeColumns("key", "lcol".append),
+      writeConf = WriteConf(ttl = TTLOption.constant(100)))
+
+    conn.withSessionDo { session =>
+      val result = session.execute(s"""SELECT TTL(lcol) FROM $ks.collections_mod WHERE key = 101""").one()
+      result.getInt(0) should be > 50
+      result.getInt(0) should be <= 100
+    }
+  }
+
+  it should "apply TTL when using list prepend" in {
+    conn.withSessionDo(_.execute(s"""TRUNCATE $ks.collections_mod"""))
+    val listElements = sc.parallelize(Seq(
+      (102, Vector("One")),
+      (102, Vector("Two")),
+      (102, Vector("Three"))))
+    listElements.saveToCassandra(ks, "collections_mod", SomeColumns("key", "lcol".prepend),
+      writeConf = WriteConf(ttl = TTLOption.constant(100)))
+
+    conn.withSessionDo { session =>
+      val result = session.execute(s"""SELECT TTL(lcol) FROM $ks.collections_mod WHERE key = 102""").one()
+      result.getInt(0) should be > 50
+      result.getInt(0) should be <= 100
+    }
+  }
+
+  it should "apply TTL when using map append" in {
+    conn.withSessionDo(_.execute(s"""TRUNCATE $ks.collections_mod"""))
+    val mapElements = sc.parallelize(Seq(
+      (103, Map("One" -> "One")),
+      (103, Map("Two" -> "Two")),
+      (103, Map("Three" -> "Three"))))
+    mapElements.saveToCassandra(ks, "collections_mod", SomeColumns("key", "mcol".append),
+      writeConf = WriteConf(ttl = TTLOption.constant(100)))
+
+    conn.withSessionDo { session =>
+      val result = session.execute(s"""SELECT TTL(mcol) FROM $ks.collections_mod WHERE key = 103""").one()
+      result.getInt(0) should be > 50
+      result.getInt(0) should be <= 100
+    }
+  }
+
+  it should "apply timestamp when using collection append" in {
+    conn.withSessionDo(_.execute(s"""TRUNCATE $ks.collections_mod"""))
+    val ts = System.currentTimeMillis() - 1000L
+    val setElements = sc.parallelize(Seq(
+      (104, Set("One")),
+      (104, Set("Two")),
+      (104, Set("Three"))))
+    setElements.saveToCassandra(ks, "collections_mod", SomeColumns("key", "scol".append),
+      writeConf = WriteConf(timestamp = TimestampOption.constant(ts * 1000L)))
+
+    conn.withSessionDo { session =>
+      val result = session.execute(s"""SELECT WRITETIME(scol) FROM $ks.collections_mod WHERE key = 104""").one()
+      result.getLong(0) should be (ts * 1000L)
+    }
+  }
+
+  it should "apply both TTL and timestamp when using collection append" in {
+    conn.withSessionDo(_.execute(s"""TRUNCATE $ks.collections_mod"""))
+    val ts = System.currentTimeMillis() - 1000L
+    val setElements = sc.parallelize(Seq(
+      (105, Set("One")),
+      (105, Set("Two")),
+      (105, Set("Three"))))
+    setElements.saveToCassandra(ks, "collections_mod", SomeColumns("key", "scol".append),
+      writeConf = WriteConf(
+        ttl = TTLOption.constant(100),
+        timestamp = TimestampOption.constant(ts * 1000L)))
+
+    conn.withSessionDo { session =>
+      val result = session.execute(s"""SELECT TTL(scol), WRITETIME(scol) FROM $ks.collections_mod WHERE key = 105""").one()
+      result.getInt(0) should be > 50
+      result.getInt(0) should be <= 100
+      result.getLong(1) should be (ts * 1000L)
+    }
+  }
+
   it should "throw an exception if you try to apply a collection behavior to a normal column" in {
     conn.withSessionDo(_.execute(s"""TRUNCATE $ks.key_value"""))
     val col = Seq((1, 1L, "value1"), (2, 2L, "value2"), (3, 3L, "value3"))
